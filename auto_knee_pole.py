@@ -1,18 +1,30 @@
-# Auto Knee Pole
+# Auto IK Knee Pole
 
 """
 
 1. Add bones for knee pole pointing.
 
-2. Add custom properties to the armature object to enable the Auto-Knee-Pole Assistance Panel:
+2. Add drivers on Z rotation of the bones AKP_point_to_knee.L and AKP_point_to_knee.R.
 
-- AKP_L_Active: Boolean
+3. Add custom properties to the armature object to enable the Auto-Knee-Pole Assistance Panel:
+
+- AKP_Enable_L_UI: Boolean
 - AKP_L_Auto_Pole_Bone_Name: String
 - AKP_L_Pole_Bone_Name: String
 
-- AKP_R_Active: Boolean
+- AKP_Enable_R_UI: Boolean
 - AKP_R_Auto_Pole_Bone_Name: String
 - AKP_R_Pole_Bone_Name: String
+
+- AKP_Whitelist_of_Keywords: String
+
+---
+
+Bones Names:
+- AKP-ik_stem_up.L/R
+- AKP-ik_stem_forward.L/R
+- AKP-point_to_knee.L/R
+- AKP-auto_knee_pole.L/R
 
 """
 
@@ -21,20 +33,37 @@ import math
 import bl_math
 import mathutils
 
-
-left_active_prop_name = 'AKP_L_Active'
+left_ui_enable_name = 'AKP_Enable_L_UI'
 left_auto_pole_bone_name = 'AKP_L_Auto_Pole_Bone_Name'
 left_actual_pole_bone_name = 'AKP_L_Pole_Bone_Name'
 
-right_active_prop_name = 'AKP_R_Active'
+right_ui_enable_name = 'AKP_Enable_R_UI'
 right_auto_pole_bone_name = 'AKP_R_Auto_Pole_Bone_Name'
 right_actual_pole_bone_name = 'AKP_R_Pole_Bone_Name'
+
+keywords_whitelist_name = 'AKP_Whitelist_of_Keywords'
 
 
 x_axis = mathutils.Vector((1, 0, 0))
 y_axis = mathutils.Vector((0, 1, 0))
 z_axis = mathutils.Vector((0, 0, 1))
 
+
+def get_axis(axis_name):
+    global x_axis, y_axis, z_axis
+    if axis_name == 'X' or axis_name == 'x':
+        return x_axis
+    if axis_name == 'Y' or axis_name == 'y':
+        return y_axis
+    if axis_name == 'Z' or axis_name == 'z':
+        return z_axis
+    if axis_name == '-X' or axis_name == '-x':
+        return -x_axis
+    if axis_name == '-Y' or axis_name == '-y':
+        return -y_axis
+    if axis_name == '-Z' or axis_name == '-z':
+        return -z_axis
+    return mathutils.Vector((0, 0, 0))
 
 def inverseLerp(a, b, v):
     return bl_math.clamp((v - a) / (b - a))
@@ -92,7 +121,7 @@ def get_result_direction(ik_stem_up, foot_forward, foot_up, foot_right, debug_pr
         return corrected_foot_up_result
 
 # Driver function
-def get_to_knee_rotation(ik_stem_up_bone, ik_stem_forward_bone, foot_bone):
+def get_to_knee_rotation(ik_stem_up_bone, ik_stem_forward_bone, foot_bone, foot_bone_up_axis_name = 'Z', foot_bone_forward_axis_name = 'Y'):
     
     global x_axis, y_axis, z_axis
     
@@ -103,10 +132,14 @@ def get_to_knee_rotation(ik_stem_up_bone, ik_stem_forward_bone, foot_bone):
     ik_stem_up = ik_stem_up_matrix.to_quaternion() @ y_axis
     ik_stem_forward = ik_stem_forward_matrix.to_quaternion() @ y_axis
 
+    foot_bone_local_up = get_axis(foot_bone_up_axis_name)
+    foot_bone_local_forward = get_axis(foot_bone_forward_axis_name)
+    foot_bone_local_right = foot_bone_local_forward.cross(foot_bone_local_up)
+
     foot_rotation = foot_matrix.to_quaternion()
-    foot_forward = foot_rotation @ y_axis
-    foot_up = foot_rotation @ z_axis
-    foot_right = foot_rotation @ x_axis
+    foot_up = foot_rotation @ foot_bone_local_up
+    foot_forward = foot_rotation @ foot_bone_local_forward
+    foot_right = foot_rotation @ foot_bone_local_right
 
     dir = get_result_direction(ik_stem_up, foot_forward, foot_up, foot_right, foot_bone)
     return get_angle_signed_with_axis(ik_stem_forward, dir, ik_stem_up)
@@ -157,11 +190,27 @@ class ControlUI(bpy.types.Panel):
     def poll(self, context):
         if context.mode != 'POSE':
             return False
+        
+        object_data = context.active_object.data
+        active_pose_bone = context.active_pose_bone
+
+        global keywords_whitelist_name
+        if keywords_whitelist_name in object_data:
+            raw_whitelist = object_data.get(keywords_whitelist_name)
+            if raw_whitelist is None or raw_whitelist == '':
+                return False
+            whitelist = raw_whitelist.split(',')
+            if active_pose_bone is None:
+                return False
+            if not any(substring in active_pose_bone.name for substring in whitelist):
+                return False
+
         try:
-            object = context.active_object
-            if context.active_pose_bone.name.endswith('.L') and object.data.get(left_active_prop_name):
+            global left_ui_enable_name, right_ui_enable_name
+            global left_actual_pole_bone_name, left_auto_pole_bone_name, right_actual_pole_bone_name, right_auto_pole_bone_name
+            if context.active_pose_bone.name.endswith('.L') and left_ui_enable_name in object_data and object_data.get(left_ui_enable_name) and left_actual_pole_bone_name in object_data and left_auto_pole_bone_name in object_data:
                 return True
-            if context.active_pose_bone.name.endswith('.R') and object.data.get(right_active_prop_name):
+            if context.active_pose_bone.name.endswith('.R') and right_ui_enable_name in object_data and object_data.get(right_ui_enable_name) and right_actual_pole_bone_name in object_data and right_auto_pole_bone_name in object_data:
                 return True
         except (AttributeError, KeyError, TypeError):
             return False
@@ -185,7 +234,7 @@ class ControlUI(bpy.types.Panel):
         # Layout
         layout = self.layout
 
-        layout.prop(pose_bones[actual_pole_bone_name].constraints['Copy Location'], 'influence', text=f'Mix.{side}', slider=True)
+        layout.prop(actual_pole_bone.constraints['Copy Location'], 'influence', text=f'Mix.{side}', slider=True)
         layout.operator('pose.knee_pole_snap_to_auto', text=f'Snap to Auto Pole.{side}')
 
 
