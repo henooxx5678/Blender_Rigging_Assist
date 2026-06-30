@@ -101,7 +101,8 @@ class ControlUI(bpy.types.Panel):
                 mix_control_bone_name = object.data.get(right_mix_control_bone_name)
 
         if mix_control_bone_name is not None:
-            layout.prop(pose_bones[mix_control_bone_name].constraints['Damped Track'], 'influence', text=f'Mix.{side}', slider=True)
+            # layout.prop(pose_bones[mix_control_bone_name].constraints['Damped Track'], 'influence', text=f'Mix.{side}', slider=True)
+            layout.prop(pose_bones[mix_control_bone_name], '["Auto Shoulder Mix"]', text=f'Mix.{side}', slider=True)
 
 
 def register():
