@@ -315,13 +315,13 @@ class POSE_OT_init_for_object(bpy.types.Operator):
         pose_bone_stem_mid = target.pose.bones[stem_mid_name]
         
         # Make pose_bone_stem_mid located at the middle of the IK stem (between root and tip)
-        add_constraint(pose_bone_stem_mid, 'COPY_LOCATION', bone_foot.name, 0, 0.5)
+        add_constraint(pose_bone_stem_mid, 'COPY_LOCATION', tip_bone_name, 0, 0.5)
         # Make pose_bone_stem_mid point up alone the IK stem
-        add_constraint(pose_bone_stem_mid, 'DAMPED_TRACK', bone_foot.name, 0, 1).track_axis = 'TRACK_NEGATIVE_Y'
+        add_constraint(pose_bone_stem_mid, 'DAMPED_TRACK', tip_bone_name, 0, 1).track_axis = 'TRACK_NEGATIVE_Y'
 
         pose_bone_pole = target.pose.bones[pole_bone_name]
         
-        add_constraint(pose_bone_pole, 'COPY_LOCATION', bone_auto_pole.name, 0, 1)
+        add_constraint(pose_bone_pole, 'COPY_LOCATION', auto_pole_name, 0, 1)
 
         # -- Add driver --
         # for Z rotation of the bone point_to_pole_name
