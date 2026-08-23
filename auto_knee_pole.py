@@ -1,32 +1,45 @@
-# Auto IK Knee Pole
+# Auto IK Knee Pole (AKP) //TODO: rename to AIKKP?
 
-# """
+"""
 
-# 1. Add bones for knee pole pointing.
+Steps to implement Auto IK Knee Pole:
 
-# 2. Add drivers on Z rotation of the bones AKP_point_to_knee.L and AKP_point_to_knee.R.
+1. Select any object as Initiator.
+2. Press "Initialize Auto Knee Pole Initiator Properties" button to initialize the custom properties.
+3. Select the armatures that need Auto IK Knee Pole, then selecting the Initiator object last to make it the active object.
+4. Press "Init Auto IK Knee Pole for Selected Armature(s)" button to initialize the Auto IK Knee Pole for the selected armatures.
 
-# 3. Add custom properties to the armature object to enable the Auto-Knee-Pole Assistance Panel:
+---
+What the initiating process does (WIP):
 
-# - AKP_Enable_L_UI: Boolean
-# - AKP_Pole_Snap_Target_Name: String
-# - AKP_L_Pole_Bone_Name: String
+1. Add bones for knee pole pointing.
 
-# - AKP_Enable_R_UI: Boolean
-# - AKP_R_Auto_Pole_Bone_Name: String
-# - AKP_R_Pole_Bone_Name: String
+2. Add drivers on Z rotation of the bones AKP_point_to_knee.L and AKP_point_to_knee.R.
 
-# - AKP_Whitelist_of_Keywords: String
+3. Add custom properties to the armature object to enable the Auto-Knee-Pole Assistance Panel:
 
-# ---
+- AKP_Enable_L_UI: Boolean
+- AKP_Pole_Snap_Target_Name: String
+- AKP_L_Pole_Bone_Name: String
 
-# Bones Names:
-# - AKP-ik_stem_up.L/R
-# - AKP-ik_stem_forward.L/R
-# - AKP-point_to_knee.L/R
-# - AKP-auto_knee_pole.L/R
+- AKP_Enable_R_UI: Boolean
+- AKP_R_Auto_Pole_Bone_Name: String
+- AKP_R_Pole_Bone_Name: String
 
-# """
+- AKP_Whitelist_of_Keywords: String
+
+---
+
+//TODO: deprecated, to be removed, replaced by initiator
+AKP Bones Names:
+- AKP-ik_stem_up.L/R            # represents the direction from the IK tip (foot) to the IK root (hip), located at the center IK stem
+- AKP-ik_stem_forward.L/R       # represents the forward direction of the IK stem 
+- AKP-point_to_knee.L/R         # the calculated direction point to knee pole (which has drivers on its Z rotation)
+- AKP-auto_knee_pole.L/R        # result pole position to be followed. can add delta position on it for manual adjustment  //TODO change name (add "delta" in the name)
+
+"""
+
+import traceback
 
 import bpy
 import math
@@ -37,31 +50,36 @@ import mathutils
 #region - Constants
 """
 "PN_" prefix means "Property Name"
+"Pbn_" prefix means "Property base name" # "base name" means the name should be added the postfix of side (e.g. ".L" or ".R") to get the actual name of the property or bone.
 "GB_" prefix means "Generated Bone"
+
+"Initiator" means the object that has the initiator properties, which is used to initialize the Auto IK Knee Pole function to target armature(s).
+
 """
 
 # Initiator Custom Properties Names
 Init_PN_postfixes_of_sides = 'Postfixes of Sides'
-Init_PN_leg_ik_root_bone_name = 'Leg_IK_Root_Bone_Name'
-Init_PN_of_leg_ik_target_bone_name = 'Leg_IK_Target_Bone_Name'
-Init_PN_of_leg_ik_pole_bone_name = 'Leg_IK_Pole_Bone_Name'
+Init_PN_leg_ik_root_bone_basename = 'Leg_IK_Root_Bone_Basename'
+Init_PN_of_leg_ik_target_bone_basename = 'Leg_IK_Target_Bone_Basename'
+Init_PN_of_leg_ik_pole_bone_basename = 'Leg_IK_Pole_Bone_Basename'
 
 # Custom Properties Names
-PN_ui_enable_name = 'AKP_Enable_UI'
-PN_keywords_whitelist_name = 'AKP_Whitelist_of_Keywords'
+PN_postfixes_of_sides = 'AKP_Postfixes_of_Sides'            # e.g. ".L,.R" for 2 legs
+PN_keywords_whitelist = 'AKP_Whitelist_of_Keywords'    # this is used to filter the pose bones that can show the Auto Knee Pole UI. e.g. "tip,ik,pole"
 
-PN_postfixes_of_sides = 'AKP_Postfixes_of_Sides'
-PN_pole_snap_target_name = 'AKP_Pole_Snap_Target_Name'
-PN_actual_pole_bone_name = 'AKP_Pole_Bone_Name'
+Pbn_ui_enable = 'AKP_Enable_UI'
+
+Pbn_pole_snap_target_name = 'AKP_Pole_Snap_Target_Name'
+Pbn_actual_pole_bone_name = 'AKP_Pole_Bone_Name'
 
 Bone_PN_AKP_mix = 'Auto_Knee_Pole_mix'
 
 # Generated Bone Names
-GB_stem_mid_base_name = 'AKP_ik_stem_mid'
-GB_stem_forward_base_name = 'AKP_ik_stem_forward'
-GB_point_to_pole_base_name = 'AKP_point_to_pole'
-GB_auto_pole_base_name = 'AKP_auto_pole'
-GB_auto_pole_delta_base_name = 'AKP_auto_pole_delta'
+GB_stem_mid_basename = 'AKP_ik_stem_mid'               # As the root of all generated bones. Represents the direction from the IK tip (foot) to the IK root (hip), located at the center of the IK stem.
+GB_stem_forward_basename = 'AKP_ik_stem_forward'       # Represents the forward direction of the IK stem. Just for view check, not used in calculation.
+GB_point_to_pole_basename = 'AKP_point_to_pole'        # Calculated direction point to knee pole (which has drivers on its Z rotation)
+GB_auto_pole_basename = 'AKP_auto_pole'                # Result pole position to be followed. can add delta position on it for manual adjustment  //TODO change name (add "delta" in the name)
+# GB_auto_pole_delta_base_name = 'AKP_auto_pole_delta'  # //TODO may not needed
 
 # Vector
 X_AXIS = mathutils.Vector((1, 0, 0))
@@ -105,45 +123,122 @@ def get_angle_signed_with_axis(from_vec, to_vec, axis):
 
 
 #region - Initialization
+## TO Make "Initialize Auto Knee Pole Initiator Properties" as command instead of a button
+# class Init_Initiator_UI(bpy.types.Panel):
+#     bl_idname = 'VIEW3D_PT_AutoKneePole_Init_Initiator_UI'
+#     bl_label = 'Auto Knee Pole Initiating'
+#     bl_space_type = 'VIEW_3D'
+#     bl_region_type = 'UI'
+#     bl_category = 'Item'
 
-class POSE_OT_init_initiator_properties(bpy.types.Operator):
-    bl_idname = "pose.init_initiator_properties"
-    bl_label = "Init Auto Knee Pole Initiator Properties"
+#     @classmethod
+#     def poll(self, context):
+#         obj = context.active_object
+#         if obj is None:
+#             return False
+#         if self.has_initialized_properties(obj):
+#             return False
+#         return True
 
-    @classmethod
-    def poll(cls, context):
-        if context.active_object is None:
-            return False
-        return True
+#     def draw(self, context):
+#         # Layout
+#         layout = self.layout
+#         layout.operator('pose.init_initiator_properties', text=f'Initialize Auto Knee Pole Initiator Properties')
 
-    def execute(self, context):
-        obj = bpy.context.active_object
+#     @staticmethod
+#     def has_initialized_properties(obj):
+#         return (Init_PN_postfixes_of_sides in obj and
+#                 Init_PN_leg_ik_root_bone_basename in obj and
+#                 Init_PN_of_leg_ik_target_bone_basename in obj and
+#                 Init_PN_of_leg_ik_pole_bone_basename in obj)
 
-        obj[Init_PN_postfixes_of_sides] = '.L,.R'
-        obj[Init_PN_leg_ik_root_bone_name] = ''
-        obj[Init_PN_of_leg_ik_target_bone_name] = ''
-        obj[Init_PN_of_leg_ik_pole_bone_name] = ''
-        return {'FINISHED'}
-    
-
-class Init_Initiator_UI(bpy.types.Panel):
-    bl_idname = 'VIEW3D_PT_AutoKneePole_Init_Initiator_UI'
-    bl_label = 'Auto Knee Pole Initiating'
-    bl_space_type = 'PROPERTIES'
-    bl_region_type = 'WINDOW'
-    bl_context = 'object'
+class Init_UI(bpy.types.Panel):
+    bl_idname = 'VIEW3D_PT_AutoKneePole_Init_UI'
+    bl_label = 'Auto Knee Pole'
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Item'
 
     @classmethod
     def poll(self, context):
-        if context.active_object is None:
+        obj = context.active_object
+        if obj is None:
+            return False
+        if Init_PN_postfixes_of_sides not in obj:
+            return False
+        if Init_PN_leg_ik_root_bone_basename not in obj:
+            return False
+        if Init_PN_of_leg_ik_target_bone_basename not in obj:
+            return False
+        if Init_PN_of_leg_ik_pole_bone_basename not in obj:
             return False
         return True
-
+    
     def draw(self, context):
+        obj = context.active_object
+
+        def check_if_can_init():
+            target_objs = [x for x in context.selected_objects if x != obj]
+            for target_obj in target_objs:
+                if target_obj.type != 'ARMATURE':
+                    return 'not an armature'
+                
+                postfixes_of_sides = obj.get(Init_PN_postfixes_of_sides).split(',')
+                required_basenames = [
+                    obj[Init_PN_leg_ik_root_bone_basename],
+                    obj[Init_PN_of_leg_ik_target_bone_basename],
+                    obj[Init_PN_of_leg_ik_pole_bone_basename]
+                ]
+
+                pose_bones = target_obj.pose.bones
+                for basename in required_basenames:
+                    for postfix in postfixes_of_sides:
+                        required_bone_name = basename + postfix
+                        if pose_bones.get(required_bone_name) is None:
+                            return f'missing bone "{required_bone_name}"'
+            return True
+        
         # Layout
         layout = self.layout
-        layout.operator('pose.init_initiator_properties', text=f'Init Auto Knee Pole Initiator Properties')
 
+        can_init_check_result = check_if_can_init()
+        if can_init_check_result is True:
+            # Generate the Auto IK Knee Pole bones and drivers for the selected armature(s) excluding the initiator object itself.
+            layout.operator('pose.init_for_object', text=f'Init Auto IK Knee Pole for Selected Armature(s)')
+        else:
+            layout.label(text=f'Cannot Init: One or more targets are {can_init_check_result}.')
+
+
+class POSE_OT_init_initiator_properties(bpy.types.Operator):
+    bl_idname = "pose.init_initiator_properties"
+    bl_label = "Init Auto IK Knee Pole Initiator Properties"
+    bl_description = "Initialize custom properties for Auto Knee Pole Initiator"
+    bl_options = {'REGISTER', 'UNDO'}
+
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object is not None
+
+    def execute(self, context):
+        obj = context.active_object
+
+        if self.has_initialized_properties(obj):
+            self.report({'WARNING'}, 'Object already has the properties.')
+            return {'CANCELLED'}
+
+        obj[Init_PN_postfixes_of_sides] = '.L,.R'
+        obj[Init_PN_leg_ik_root_bone_basename] = ''
+        obj[Init_PN_of_leg_ik_target_bone_basename] = ''
+        obj[Init_PN_of_leg_ik_pole_bone_basename] = ''
+        return {'FINISHED'}
+    
+    @staticmethod
+    def has_initialized_properties(obj):
+        return (Init_PN_postfixes_of_sides in obj and
+                Init_PN_leg_ik_root_bone_basename in obj and
+                Init_PN_of_leg_ik_target_bone_basename in obj and
+                Init_PN_of_leg_ik_pole_bone_basename in obj)
 
 class POSE_OT_init_for_object(bpy.types.Operator):
     bl_idname = "pose.init_for_object"
@@ -155,7 +250,7 @@ class POSE_OT_init_for_object(bpy.types.Operator):
         if obj is None:
             return False
         
-        target_armatures = self.get_target_armatures(self, context)
+        target_armatures = self.get_target_armatures(context)
         if len(target_armatures) == 0:
             return False
         return True
@@ -165,38 +260,46 @@ class POSE_OT_init_for_object(bpy.types.Operator):
         initiator = bpy.context.active_object
 
         context.selected_objects
-        target_armatures = self.get_target_armatures(self, context)
+        target_armatures = self.get_target_armatures(context)
         for target_armature in target_armatures:
 
-            postfixes = self.get_postfix_of_sides(self, context, initiator)
+            postfixes = self.get_postfix_of_sides(initiator)
 
             for postfix in postfixes:
-                self.init_bones(self, context, initiator, target_armature, postfix)
+                self.init_bones(context, initiator, target_armature, postfix)
 
-            self.init_custom_properties(self, context, initiator, target_armature)
+            self.init_custom_properties(context, initiator, target_armature)
 
+        context.view_layer.objects.active = initiator  # Set the initiator back to active object after initialization.
         context.view_layer.update()
         return {'FINISHED'}
 
     def init_bones(self, context, initiator, target, post_fix):
+        context.view_layer.objects.active = target  # Set the target armature as the active object to ensure that the bone creation and constraint addition are applied to the correct armature.
+
         currentMode = bpy.context.object.mode
 
         # -- Add bones --
-        bpy.ops.object.mode_set(mode='EDIT', toggle=False)
+        bpy.ops.object.mode_set(mode = 'EDIT')
 
         edit_bones = target.data.edit_bones
 
-        stem_mid_name = GB_stem_mid_base_name + post_fix
-        stem_forward_name = GB_stem_forward_base_name + post_fix
-        point_to_pole_name = GB_point_to_pole_base_name + post_fix
-        auto_pole_name = GB_auto_pole_base_name + post_fix
-        auto_pole_delta_name = GB_auto_pole_delta_base_name + post_fix
+        stem_mid_name = GB_stem_mid_basename + post_fix
+        stem_forward_name = GB_stem_forward_basename + post_fix
+        point_to_pole_name = GB_point_to_pole_basename + post_fix
+        auto_pole_name = GB_auto_pole_basename + post_fix
         stem_bone_length_multiplier = 0.167  # 1/6
         auto_pole_bone_length_multiplier = 0.5
         
-        bone_root = edit_bones[initiator[Init_PN_leg_ik_root_bone_name]]
-        bone_foot = edit_bones[initiator[Init_PN_of_leg_ik_target_bone_name]]
-        bone_pole = edit_bones[initiator[Init_PN_of_leg_ik_pole_bone_name]]
+        # Initialize bone names
+        root_bone_name = initiator[Init_PN_leg_ik_root_bone_basename] + post_fix
+        tip_bone_name = initiator[Init_PN_of_leg_ik_target_bone_basename] + post_fix
+        pole_bone_name = initiator[Init_PN_of_leg_ik_pole_bone_basename] + post_fix
+
+        bone_root = edit_bones[root_bone_name]
+        bone_foot = edit_bones[tip_bone_name]
+        bone_pole = edit_bones[pole_bone_name]
+
         root_to_tip = bone_foot.head - bone_root.head
         stem_bone_length = root_to_tip.length * stem_bone_length_multiplier
         forward = proj_on_plane(bone_foot.vector, root_to_tip).normalized()
@@ -225,10 +328,9 @@ class POSE_OT_init_for_object(bpy.types.Operator):
         bone_auto_pole.head = bone_point_to_pole.tail + proj_on_plane(bone_pole.head - bone_point_to_pole.tail, root_to_tip)
         bone_auto_pole.tail = bone_auto_pole.head + bone_point_to_pole.vector.normalized() * bone_pole.vector.length * auto_pole_bone_length_multiplier
 
-        bone_auto_pole_delta = add_bone(auto_pole_delta_name, bone_auto_pole)
 
         # -- Add pose constraints --
-        bpy.ops.object.mode_set(mode = 'POSE', toggle=False)
+        bpy.ops.object.mode_set(mode = 'POSE')
 
         def add_constraint(pose_bone, constraint_type, target_bone_name, head_tail, influence):
             constraint = pose_bone.constraints.new(constraint_type)
@@ -245,12 +347,14 @@ class POSE_OT_init_for_object(bpy.types.Operator):
 
         pose_bone_stem_mid = target.pose.bones[stem_mid_name]
         
+        # Make pose_bone_stem_mid located at the middle of the IK stem (between root and tip)
         add_constraint(pose_bone_stem_mid, 'COPY_LOCATION', bone_foot.name, 0, 0.5)
+        # Make pose_bone_stem_mid point up alone the IK stem
         add_constraint(pose_bone_stem_mid, 'DAMPED_TRACK', bone_foot.name, 0, 1).track_axis = 'TRACK_NEGATIVE_Y'
 
-        pose_bone_pole = target.pose.bones[initiator[Init_PN_of_leg_ik_pole_bone_name]]
+        pose_bone_pole = target.pose.bones[pole_bone_name]
         
-        add_constraint(pose_bone_pole, 'COPY_LOCATION', bone_auto_pole_delta.name, 0, 1)
+        add_constraint(pose_bone_pole, 'COPY_LOCATION', bone_auto_pole.name, 0, 1)
 
         # -- Add driver --
         # for Z rotation of the bone point_to_pole_name
@@ -272,85 +376,58 @@ class POSE_OT_init_for_object(bpy.types.Operator):
 
         driver.expression = f'get_to_knee_rotation({var_ik_up.name}, {var_ik_forward.name}, {var_foot.name})'
 
-        bpy.ops.object.mode_set(mode = currentMode, toggle=False)
+        bpy.ops.object.mode_set(mode = currentMode)  # Restore the original mode after bone creation and constraint addition.
 
     def init_custom_properties(self, context, initiator, target):
-        postfixes = self.get_postfix_of_sides(self, context, initiator)
-
         target.data[PN_postfixes_of_sides] = initiator[Init_PN_postfixes_of_sides]
-        target.data[PN_keywords_whitelist_name] = ''
+        target.data[PN_keywords_whitelist] = ''
+
+        postfixes = self.get_postfix_of_sides(initiator)
 
         for postfix in postfixes:
-            target.data[PN_ui_enable_name + postfix] = True
-            target.data[PN_actual_pole_bone_name + postfix] = self.auto_pole_base_name + postfix
-            target.data[PN_pole_snap_target_name + postfix] = self.point_to_pole_base_name + postfix
-            target.pose.bones[self.auto_pole_delta_base_name + postfix][Bone_PN_AKP_mix] = 1
+            # Bone names
+            pole_bone_name = initiator[Init_PN_of_leg_ik_pole_bone_basename] + postfix
+            auto_pole_bone_name = GB_auto_pole_basename + postfix
+            pole_snap_target_bone_name = auto_pole_bone_name  # Set the snap target as the auto pole bone, which is the result of the Auto IK Knee Pole calculation.
+
+            # Custom property names
+            UI_enable_property_name = Pbn_ui_enable + postfix
+            actual_pole_bone_name_property_name = Pbn_actual_pole_bone_name + postfix
+            pole_snap_target_name_property_name = Pbn_pole_snap_target_name + postfix
+
+            target.data[UI_enable_property_name] = True
+            target.data[actual_pole_bone_name_property_name] = pole_bone_name
+            target.data[pole_snap_target_name_property_name] = pole_snap_target_bone_name
             
-            driver = target.pose.bones[initiator[Init_PN_of_leg_ik_pole_bone_name]].constraints['Copy Location'].driver_add('influence').driver
+            # Add custom property "Mix" with [0, 1] range in float
+            pose_bone_pole_snap_target = target.pose.bones[pole_snap_target_bone_name]
+            pose_bone_pole_snap_target[Bone_PN_AKP_mix] = 1.0
+            pose_bone_pole_snap_target.id_properties_ui(Bone_PN_AKP_mix).update(
+                min=0.0,
+                max=1.0,
+                soft_min=0.0,
+                soft_max=1.0,
+                description="Mix between the AIKKP position and the original pole position. 0 means fully original pole position, 1 means fully AIKKP position."
+            )
+                        
+            # Setup driver for the influence of the Copy Location constraint on the pole bone
+            driver = target.pose.bones[pole_bone_name].constraints['Copy Location'].driver_add('influence').driver
             driver.type = 'SCRIPTED'
             var_mix = driver.variables.new()
             var_mix.name = 'mix'
             var_mix.type = 'SINGLE_PROP'
             var_mix.targets[0].id = target
-            var_mix.targets[0].data_path = f'pose.bones["{self.auto_pole_delta_base_name + postfix}"]["{Bone_PN_AKP_mix}"]'
+            var_mix.targets[0].data_path = f'pose.bones["{pole_snap_target_bone_name}"]["{Bone_PN_AKP_mix}"]'
             driver.expression = f'{var_mix.name}'
 
-
-    def get_target_armatures(self, context):
+    @staticmethod
+    def get_target_armatures(context):
         obj = context.active_object
         return [x for x in context.selected_objects if x != obj and x.type == 'ARMATURE']
 
-    def get_postfix_of_sides(self, context, initiator):
+    @staticmethod
+    def get_postfix_of_sides(initiator):
         return initiator[Init_PN_postfixes_of_sides].split(',')
-
-
-class Init_UI(bpy.types.Panel):
-    bl_idname = 'VIEW3D_PT_AutoKneePole_Init_UI'
-    bl_label = 'Auto Knee Pole'
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = 'Item'
-
-    @classmethod
-    def poll(self, context):
-        obj = context.active_object
-        if obj is None:
-            return False
-        if Init_PN_postfixes_of_sides not in obj:
-            return False
-        if Init_PN_leg_ik_root_bone_name not in obj:
-            return False
-        if Init_PN_of_leg_ik_target_bone_name not in obj:
-            return False
-        if Init_PN_of_leg_ik_pole_bone_name not in obj:
-            return False
-        return True
-    
-    def draw(self, context):
-        obj = context.active_object
-
-        def check_if_can_init():
-            target_objs = [x for x in context.selected_objects if x != obj]
-            for target_obj in target_objs:
-                if target_obj.type != 'ARMATURE':
-                    return 'not an armature'
-                pose_bones = target_obj.pose.bones
-                if pose_bones.get(obj[Init_PN_leg_ik_root_bone_name]) is None:
-                    return f'missing bone "{obj[Init_PN_leg_ik_root_bone_name]}"'
-                if pose_bones.get(obj[Init_PN_of_leg_ik_target_bone_name]) is None:
-                    return f'missing bone "{obj[Init_PN_of_leg_ik_target_bone_name]}"'
-                if pose_bones.get(obj[Init_PN_of_leg_ik_pole_bone_name]) is None:
-                    return f'missing bone "{obj[Init_PN_of_leg_ik_pole_bone_name]}"'
-            return True
-        
-        # Layout
-        layout = self.layout
-
-        can_init_check_result = check_if_can_init()
-        if (check_if_can_init == True):
-            layout.operator('pose.init_for_object', text=f'Init Auto Knee Pole')
-        else:
-            layout.label(text=f'Cannot Init: One or more targets are {can_init_check_result}.')
 
 #endregion
 
@@ -463,11 +540,11 @@ class Control_UI(bpy.types.Panel):
         if context.mode != 'POSE':
             return False
         
-        object_data = context.active_object.data
+        obj_data = context.active_object.data
         active_pose_bone = context.active_pose_bone
 
-        if PN_keywords_whitelist_name in object_data:
-            raw_whitelist = object_data.get(PN_keywords_whitelist_name)
+        if PN_keywords_whitelist in obj_data:
+            raw_whitelist = obj_data.get(PN_keywords_whitelist)
             if raw_whitelist is None or raw_whitelist == '':
                 return False
             whitelist = raw_whitelist.split(',')
@@ -477,31 +554,33 @@ class Control_UI(bpy.types.Panel):
                 return False
 
         try:
-            postfix_of_side = self.get_postfix_of_sides(self, context, object_data)
+            postfix_of_side = self.get_postfix_of_sides(context, obj_data)
 
             if not context.active_pose_bone.name.endswith(postfix_of_side):
                 return False
-            if not PN_ui_enable_name + postfix_of_side in object_data:
+            if not Pbn_ui_enable + postfix_of_side in obj_data:
                 return False
-            if not object_data.get(PN_ui_enable_name + postfix_of_side):
+            if not obj_data.get(Pbn_ui_enable + postfix_of_side):
                 return False
-            if not PN_actual_pole_bone_name + postfix_of_side in object_data:
+            if not Pbn_actual_pole_bone_name + postfix_of_side in obj_data:
                 return False
-            if not PN_pole_snap_target_name + postfix_of_side in object_data:
+            if not Pbn_pole_snap_target_name + postfix_of_side in obj_data:
                 return False
             return True
         except (AttributeError, KeyError, TypeError):
+            print("Error in Control_UI.poll: ", traceback.format_exc())
             return False
     
     def draw(self, context):
 
         obj = context.active_object
+        obj_data = obj.data
         pose_bones = obj.pose.bones
         
-        postfix_of_side = self.get_postfix_of_sides(self, context, obj.data)
+        postfix_of_side = self.get_postfix_of_sides(context, obj_data)
 
-        pole_bone = pose_bones[obj.data.get(PN_actual_pole_bone_name) + postfix_of_side]
-        pole_snap_target_bone = pose_bones[obj.data.get(PN_pole_snap_target_name) + postfix_of_side]
+        pole_bone = pose_bones[obj_data.get(Pbn_actual_pole_bone_name + postfix_of_side)]
+        pole_snap_target_bone = pose_bones[obj_data.get(Pbn_pole_snap_target_name + postfix_of_side)]
 
         # Set the necessary properties for the operator
         POSE_OT_pole_snap.pole_bone = pole_bone
@@ -513,15 +592,13 @@ class Control_UI(bpy.types.Panel):
         layout.prop(pole_snap_target_bone, f'["{Bone_PN_AKP_mix}"]', text=f'Mix{postfix_of_side}', slider=True)
         layout.operator('pose.knee_pole_snap_to_auto', text=f'Snap to Auto Pole{postfix_of_side}')
 
-
-    def get_postfix_of_sides(self, context, custom_property_carrier):
+    @staticmethod
+    def get_postfix_of_sides(context, custom_property_carrier):
         
         postfixes_of_sides = custom_property_carrier.get(PN_postfixes_of_sides).split(',')
-        matched = [context.active_pose_bone.endswith(postfix) for postfix in postfixes_of_sides]
-        
-        if len(matched) == 0:
-            return ''
-        return matched[0]
+        matched_postfix = next((postfix for postfix in postfixes_of_sides if context.active_pose_bone.name.endswith(postfix)), '')
+
+        return matched_postfix
     
     
 #endregion
@@ -531,7 +608,7 @@ class Control_UI(bpy.types.Panel):
 def register():
     bpy.utils.register_class(POSE_OT_init_initiator_properties)
     bpy.utils.register_class(POSE_OT_init_for_object)
-    bpy.utils.register_class(Init_Initiator_UI)
+    # bpy.utils.register_class(Init_Initiator_UI)
     bpy.utils.register_class(Init_UI)
     bpy.utils.register_class(Control_UI)
     bpy.utils.register_class(POSE_OT_pole_snap)
@@ -539,12 +616,16 @@ def register():
 def unregister():
     bpy.utils.unregister_class(POSE_OT_init_initiator_properties)
     bpy.utils.unregister_class(POSE_OT_init_for_object)
-    bpy.utils.unregister_class(Init_Initiator_UI)
+    # bpy.utils.unregister_class(Init_Initiator_UI)
     bpy.utils.unregister_class(Init_UI)
     bpy.utils.unregister_class(Control_UI)
     bpy.utils.unregister_class(POSE_OT_pole_snap)
 
 
 if __name__ == '__main__':
+    try:
+        unregister()
+    except:
+        pass
     register()
 # endregion
