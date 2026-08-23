@@ -35,7 +35,7 @@ AKP Bones Names:
 - AKP-ik_stem_up.L/R            # represents the direction from the IK tip (foot) to the IK root (hip), located at the center IK stem
 - AKP-ik_stem_forward.L/R       # represents the forward direction of the IK stem 
 - AKP-point_to_knee.L/R         # the calculated direction point to knee pole (which has drivers on its Z rotation)
-- AKP-auto_knee_pole.L/R        # result pole position to be followed. can add delta position on it for manual adjustment  //TODO change name (add "delta" in the name)
+- AKP-auto_knee_pole.L/R        # result pole position to be followed. can add delta position on it for manual adjustment
 
 """
 
@@ -87,7 +87,7 @@ Bone_PN_AKP_mix = 'Auto_Knee_Pole_mix'
 GB_stem_mid_basename = 'AKP_ik_stem_mid'               # As the root of all generated bones. Represents the direction from the IK tip (foot) to the IK root (hip), located at the center of the IK stem.
 GB_stem_forward_basename = 'AKP_ik_stem_forward'       # Represents the forward direction of the IK stem. Used for calculating tne result.
 GB_point_to_pole_basename = 'AKP_point_to_pole'        # Calculated direction point to knee pole (which has drivers on its Z rotation)
-GB_auto_pole_basename = 'AKP_auto_pole'                # Result pole position to be followed. can add delta position on it for manual adjustment  //TODO change name (add "delta" in the name)
+GB_auto_pole_basename = 'AKP_auto_pole'                # Result pole position to be followed. can add delta position on it for manual adjustment
 
 # Vector
 X_AXIS = mathutils.Vector((1, 0, 0))
@@ -196,10 +196,10 @@ class POSE_OT_init_initiator_properties(bpy.types.Operator):
             self.report({'WARNING'}, 'Object already has the properties.')
             return {'CANCELLED'}
 
+
+        for prop in list_of_Init_PN:
+            obj[prop] = ''
         obj[Init_PN_postfixes_of_sides] = '.L,.R'
-        obj[Init_PN_leg_ik_root_bone_basename] = ''
-        obj[Init_PN_of_leg_ik_target_bone_basename] = ''
-        obj[Init_PN_of_leg_ik_pole_bone_basename] = ''
         return {'FINISHED'}
     
     @staticmethod
@@ -342,7 +342,7 @@ class POSE_OT_init_for_object(bpy.types.Operator):
 
         var_ik_up = set_up_pose_bone_var('ik_up', stem_mid_name)
         var_ik_forward = set_up_pose_bone_var('ik_fwd', stem_forward_name)
-        var_foot = set_up_pose_bone_var('foot', bone_foot.name)
+        var_foot = set_up_pose_bone_var('foot', tip_bone_name)
 
         driver.expression = f'get_to_knee_rotation({var_ik_up.name}, {var_ik_forward.name}, {var_foot.name})'
 
