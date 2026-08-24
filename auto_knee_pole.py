@@ -1,42 +1,37 @@
 # Auto IK Knee Pole (AKP) //TODO: rename to AIKKP?
 
 """
+Auto IK Knee Pole (AKP)
 
 Steps to implement Auto IK Knee Pole:
-
-1. Select any object as Initiator.
-2. Press "Initialize Auto Knee Pole Initiator Properties" button to initialize the custom properties.
-3. Select the armatures that need Auto IK Knee Pole, then selecting the Initiator object last to make it the active object.
-4. Press "Init Auto IK Knee Pole for Selected Armature(s)" button to initialize the Auto IK Knee Pole for the selected armatures.
-
----
-What the initiating process does (WIP):
-
-1. Add bones for knee pole pointing.
-
-2. Add drivers on Z rotation of the bones AKP_point_to_knee.L and AKP_point_to_knee.R.
-
-3. Add custom properties to the armature object to enable the Auto-Knee-Pole Assistance Panel:
-
-- AKP_Enable_L_UI: Boolean
-- AKP_Pole_Snap_Target_Name: String
-- AKP_L_Pole_Bone_Name: String
-
-- AKP_Enable_R_UI: Boolean
-- AKP_R_Auto_Pole_Bone_Name: String
-- AKP_R_Pole_Bone_Name: String
-
-- AKP_Whitelist_of_Keywords: String
+1. Select an object to act as the Initiator (can be any Object).
+2. Press F3 then search & run the operator "Init Auto IK Knee Pole Initiator Properties" to initialize the required custom properties on the Initiator.
+3. Populate the properties on the Initiator.
+4. Select the target Armature(s), then select the Initiator object LAST (so it is the Active Object).
+5. Press "Init Auto IK Knee Pole for Selected Armature(s)" button in the Item panel to do the initialization.
 
 ---
+* "Initiator" means the object that has the initiator properties, which is used to initialize the Auto IK Knee Pole function to target armature(s).
 
-//TODO: deprecated, to be removed, replaced by initiator
-AKP Bones Names:
-- AKP-ik_stem_up.L/R            # represents the direction from the IK tip (foot) to the IK root (hip), located at the center IK stem
-- AKP-ik_stem_forward.L/R       # represents the forward direction of the IK stem 
-- AKP-point_to_knee.L/R         # the calculated direction point to knee pole (which has drivers on its Z rotation)
-- AKP-auto_knee_pole.L/R        # result pole position to be followed. can add delta position on it for manual adjustment
+---
+What the initialization process does:
 
+1. Creates AKP helper bones in the target armature for each side postfix:
+   - AKP_ik_stem_mid<postfix>     : Root helper located at IK stem center.
+   - AKP_ik_stem_forward<postfix> : Marks forward direction of the IK stem.
+   - AKP_point_to_pole<postfix>  : Calculated direction pointing to pole (driven Z rotation).
+   - AKP_auto_pole<postfix>      : Target position bone for the pole constraint, holds 'Auto_Knee_Pole_mix'.
+
+2. Adds a driver to AKP_point_to_pole's Z rotation (Euler) via the custom driver function "get_to_knee_rotation".
+
+3. Applies 'COPY_LOCATION' constraint on the original Pole Bone targeting `AKP_auto_pole`, driven by the custom property `Auto_Knee_Pole_mix` on `AKP_auto_pole`.
+
+4. Sets custom properties on the Armature Data:
+   - AKP_Postfixes_of_Sides
+   - AKP_Whitelist_of_Keywords
+   - AKP_Enable_UI<postfix>
+   - AKP_Pole_Bone_Name<postfix>
+   - AKP_Pole_Snap_Target_Name<postfix>
 """
 
 import traceback
@@ -52,9 +47,6 @@ import mathutils
 "PN_" prefix means "Property Name"
 "Pbn_" prefix means "Property base name" # "base name" means the name should be added the postfix of side (e.g. ".L" or ".R") to get the actual name of the property or bone.
 "GB_" prefix means "Generated Bone"
-
-"Initiator" means the object that has the initiator properties, which is used to initialize the Auto IK Knee Pole function to target armature(s).
-
 """
 
 # Initiator Custom Properties Names
@@ -73,8 +65,8 @@ list_of_Init_PN = [
 ]
 
 # Custom Properties Names
-PN_postfixes_of_sides = 'AKP_Postfixes_of_Sides'            # e.g. ".L,.R" for 2 legs
-PN_keywords_whitelist = 'AKP_Whitelist_of_Keywords'    # this is used to filter the pose bones that can show the Auto Knee Pole UI. e.g. "tip,ik,pole"
+PN_postfixes_of_sides = 'AKP_Postfixes_of_Sides'       # e.g. ".L,.R" for 2 legs
+PN_keywords_whitelist = 'AKP_Whitelist_of_Keywords'    # This is used to filter the pose bones that can show the Auto Knee Pole UI. e.g. "tip,ik,pole"
 
 Pbn_ui_enable = 'AKP_Enable_UI'
 
@@ -85,7 +77,7 @@ Bone_PN_AKP_mix = 'Auto_Knee_Pole_mix'
 
 # Generated Bone Names
 GB_stem_mid_basename = 'AKP_ik_stem_mid'               # As the root of all generated bones. Represents the direction from the IK tip (foot) to the IK root (hip), located at the center of the IK stem.
-GB_stem_forward_basename = 'AKP_ik_stem_forward'       # Represents the forward direction of the IK stem. Used for calculating tne result.
+GB_stem_forward_basename = 'AKP_ik_stem_forward'       # Represents the forward direction of the IK stem. Used for calculating the result.
 GB_point_to_pole_basename = 'AKP_point_to_pole'        # Calculated direction point to knee pole (which has drivers on its Z rotation)
 GB_auto_pole_basename = 'AKP_auto_pole'                # Result pole position to be followed. can add delta position on it for manual adjustment
 
@@ -127,6 +119,11 @@ def get_angle_signed_with_axis(from_vec, to_vec, axis):
         dir = 1
 
     return from_vec.angle(to_vec) * dir
+
+def get_postfix_of_side(context, custom_property_carrier):
+    postfixes_of_sides = custom_property_carrier.get(PN_postfixes_of_sides).split(',')
+    matched_postfix = next((postfix for postfix in postfixes_of_sides if context.active_pose_bone.name.endswith(postfix)), '')
+    return matched_postfix
 #endregion
 
 
@@ -229,7 +226,7 @@ class POSE_OT_init_for_object(bpy.types.Operator):
         target_armatures = self.get_target_armatures(context)
         for target_armature in target_armatures:
 
-            postfixes = self.get_postfix_of_sides(initiator)
+            postfixes = self.get_postfix_of_side(initiator)
 
             for postfix in postfixes:
                 self.init_bones(context, initiator, target_armature, postfix)
@@ -316,7 +313,7 @@ class POSE_OT_init_for_object(bpy.types.Operator):
         
         # Make pose_bone_stem_mid located at the middle of the IK stem (between root and tip)
         add_constraint(pose_bone_stem_mid, 'COPY_LOCATION', tip_bone_name, 0, 0.5)
-        # Make pose_bone_stem_mid point up alone the IK stem
+        # Make pose_bone_stem_mid point up along the IK stem
         add_constraint(pose_bone_stem_mid, 'DAMPED_TRACK', tip_bone_name, 0, 1).track_axis = 'TRACK_NEGATIVE_Y'
 
         pose_bone_pole = target.pose.bones[pole_bone_name]
@@ -326,7 +323,7 @@ class POSE_OT_init_for_object(bpy.types.Operator):
         # -- Add driver --
         # for Z rotation of the bone point_to_pole_name
         pose_bone_point_to_pole = target.pose.bones[point_to_pole_name]
-        pose_bone_point_to_pole.rotation_mode = 'XYZ' # The default is Quaternion, so we need to change it to Euler
+        pose_bone_point_to_pole.rotation_mode = 'XYZ' # The default is Quaternion, so we need to change it to Euler, or will fail
         driver = pose_bone_point_to_pole.driver_add('rotation_euler', 2).driver  # Z rotation
         driver.type = 'SCRIPTED'
         # Set color to the bone to represent it has a driver
@@ -352,7 +349,7 @@ class POSE_OT_init_for_object(bpy.types.Operator):
         target.data[PN_postfixes_of_sides] = initiator[Init_PN_postfixes_of_sides]
         target.data[PN_keywords_whitelist] = initiator[Init_PN_keywords_whitelist]
 
-        postfixes = self.get_postfix_of_sides(initiator)
+        postfixes = self.get_postfix_of_side(initiator)
 
         for postfix in postfixes:
             # Bone names
@@ -377,7 +374,7 @@ class POSE_OT_init_for_object(bpy.types.Operator):
                 max=1.0,
                 soft_min=0.0,
                 soft_max=1.0,
-                description="Mix between the AIKKP position and the original pole position. 0 means fully original pole position, 1 means fully AIKKP position."
+                description="Mix between the AKP position and the original pole position. 0 means fully original pole position, 1 means fully AKP position."
             )
                         
             # Setup driver for the influence of the Copy Location constraint on the pole bone
@@ -396,14 +393,26 @@ class POSE_OT_init_for_object(bpy.types.Operator):
         return [x for x in context.selected_objects if x != obj and x.type == 'ARMATURE']
 
     @staticmethod
-    def get_postfix_of_sides(initiator):
+    def get_postfix_of_side(initiator):
         return initiator[Init_PN_postfixes_of_sides].split(',')
-
 #endregion
 
 
 #region - Driver Calculation Functions
 def get_result_direction(ik_stem_up, foot_forward, foot_up, foot_right):
+    """
+    Decide whether the knee pole should follow the foot's forward or up
+    direction, blending smoothly near the switch-over angle instead of
+    popping.
+
+    Edge cases: foot pointing straight down/up the leg (forward vector
+    degenerates) falls back to foot_up; angles near the threshold are
+    slerp'd instead of hard-switched, with blend width scaled by how
+    aligned foot_right is with ik_stem_up; sign flips when the foot points
+    backward or crosses into the "pointing down" half, to avoid 180° jumps.
+
+    (doc generated by Claude, not fully examined)
+    """
 
     projected_foot_forward = proj_on_plane(foot_forward, ik_stem_up)
     projected_foot_up = proj_on_plane(foot_up, ik_stem_up)
@@ -469,34 +478,51 @@ bpy.app.driver_namespace['get_to_knee_rotation'] = get_to_knee_rotation
 
 #region - Custom UI for Auto Knee Pole controlling
 """
-- Switch on/off auto knee pole
+- Switch on/off Auto Knee Pole (0 ~ 1 blending)
 - Snap manual position to auto position
 """
 class POSE_OT_pole_snap(bpy.types.Operator):
     bl_idname = "pose.knee_pole_snap_to_auto"
     bl_label = "Snap Pole"
-
-    pole_bone = None
-    pole_snap_target_bone = None
+    bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
     def poll(cls, context):
-        if context.mode != 'POSE':
-            return False
-        if context.active_object is None:
-            return False
-        if context.active_object.type != 'ARMATURE':
-            return False
-        return True
+        return (context.mode == 'POSE' and 
+                context.active_object and 
+                context.active_object.type == 'ARMATURE' and 
+                context.active_pose_bone is not None)
 
     def execute(self, context):
-        if (self.pole_bone is None) or (self.pole_snap_target_bone is None):
+        obj = context.active_object
+        obj_data = obj.data
+        pose_bones = obj.pose.bones
+        
+        postfix_of_side = get_postfix_of_side(context, obj_data)
+
+        # 1. Get postfix of side
+        if not postfix_of_side:
+            self.report({'WARNING'}, "Active bone does not match any AKP side postfix.")
+            return {'CANCELLED'}
+
+        # 2. Get bone names
+        pole_name = obj_data.get(Pbn_actual_pole_bone_name + postfix_of_side)
+        snap_target_name = obj_data.get(Pbn_pole_snap_target_name + postfix_of_side)
+
+        if not pole_name or not snap_target_name:
+            return {'CANCELLED'}
+
+        pole_bone = pose_bones.get(pole_name)
+        pole_snap_target_bone = pose_bones.get(snap_target_name)
+
+        if not pole_bone or not pole_snap_target_bone:
             return {'CANCELLED'}
         
-        self.pole_bone.matrix.translation = self.pole_snap_target_bone.matrix.translation
+        # 3. Run Snap
+        pole_bone.matrix.translation = pole_snap_target_bone.matrix.translation
         context.view_layer.update()
         return {'FINISHED'}
-
+    
 
 class Control_UI(bpy.types.Panel):
     bl_space_type = 'VIEW_3D'
@@ -524,7 +550,7 @@ class Control_UI(bpy.types.Panel):
                 return False
 
         try:
-            postfix_of_side = self.get_postfix_of_sides(context, obj_data)
+            postfix_of_side = get_postfix_of_side(context, obj_data)
 
             if not context.active_pose_bone.name.endswith(postfix_of_side):
                 return False
@@ -542,35 +568,17 @@ class Control_UI(bpy.types.Panel):
             return False
     
     def draw(self, context):
-
         obj = context.active_object
         obj_data = obj.data
         pose_bones = obj.pose.bones
         
-        postfix_of_side = self.get_postfix_of_sides(context, obj_data)
-
-        pole_bone = pose_bones[obj_data.get(Pbn_actual_pole_bone_name + postfix_of_side)]
+        postfix_of_side = get_postfix_of_side(context, obj_data)
         pole_snap_target_bone = pose_bones[obj_data.get(Pbn_pole_snap_target_name + postfix_of_side)]
-
-        # Set the necessary properties for the operator
-        POSE_OT_pole_snap.pole_bone = pole_bone
-        POSE_OT_pole_snap.pole_snap_target_bone = pole_snap_target_bone
 
         # Layout
         layout = self.layout
-
         layout.prop(pole_snap_target_bone, f'["{Bone_PN_AKP_mix}"]', text=f'Mix{postfix_of_side}', slider=True)
         layout.operator('pose.knee_pole_snap_to_auto', text=f'Snap to Auto Pole{postfix_of_side}')
-
-    @staticmethod
-    def get_postfix_of_sides(context, custom_property_carrier):
-        
-        postfixes_of_sides = custom_property_carrier.get(PN_postfixes_of_sides).split(',')
-        matched_postfix = next((postfix for postfix in postfixes_of_sides if context.active_pose_bone.name.endswith(postfix)), '')
-
-        return matched_postfix
-    
-    
 #endregion
 
 
