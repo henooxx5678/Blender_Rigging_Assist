@@ -52,15 +52,15 @@ import mathutils
 # Initiator Custom Properties Names
 Init_PN_postfixes_of_sides = 'Postfixes of Sides'
 Init_PN_leg_ik_root_bone_basename = 'Leg_IK_Root_Bone_Basename'
-Init_PN_of_leg_ik_target_bone_basename = 'Leg_IK_Target_Bone_Basename'
-Init_PN_of_leg_ik_pole_bone_basename = 'Leg_IK_Pole_Bone_Basename'
+Init_PN_leg_ik_target_bone_basename = 'Leg_IK_Target_Bone_Basename'
+Init_PN_leg_ik_pole_bone_basename = 'Leg_IK_Pole_Bone_Basename'
 Init_PN_keywords_whitelist = 'Whitelist_of_Keyword'
 
 list_of_Init_PN = [
     Init_PN_postfixes_of_sides,
     Init_PN_leg_ik_root_bone_basename,
-    Init_PN_of_leg_ik_target_bone_basename,
-    Init_PN_of_leg_ik_pole_bone_basename,
+    Init_PN_leg_ik_target_bone_basename,
+    Init_PN_leg_ik_pole_bone_basename,
     Init_PN_keywords_whitelist
 ]
 
@@ -152,8 +152,8 @@ class Init_UI(bpy.types.Panel):
                 postfixes_of_sides = obj.get(Init_PN_postfixes_of_sides).split(',')
                 required_basenames = [
                     obj[Init_PN_leg_ik_root_bone_basename],
-                    obj[Init_PN_of_leg_ik_target_bone_basename],
-                    obj[Init_PN_of_leg_ik_pole_bone_basename]
+                    obj[Init_PN_leg_ik_target_bone_basename],
+                    obj[Init_PN_leg_ik_pole_bone_basename]
                 ]
 
                 pose_bones = target_obj.pose.bones
@@ -256,8 +256,8 @@ class POSE_OT_init_for_object(bpy.types.Operator):
         
         # Initialize bone names
         root_bone_name = initiator[Init_PN_leg_ik_root_bone_basename] + post_fix
-        tip_bone_name = initiator[Init_PN_of_leg_ik_target_bone_basename] + post_fix
-        pole_bone_name = initiator[Init_PN_of_leg_ik_pole_bone_basename] + post_fix
+        tip_bone_name = initiator[Init_PN_leg_ik_target_bone_basename] + post_fix
+        pole_bone_name = initiator[Init_PN_leg_ik_pole_bone_basename] + post_fix
 
         bone_root = edit_bones[root_bone_name]
         bone_foot = edit_bones[tip_bone_name]
@@ -353,7 +353,7 @@ class POSE_OT_init_for_object(bpy.types.Operator):
 
         for postfix in postfixes:
             # Bone names
-            pole_bone_name = initiator[Init_PN_of_leg_ik_pole_bone_basename] + postfix
+            pole_bone_name = initiator[Init_PN_leg_ik_pole_bone_basename] + postfix
             auto_pole_bone_name = GB_auto_pole_basename + postfix
             pole_snap_target_bone_name = auto_pole_bone_name  # Set the snap target as the auto pole bone, which is the result of the Auto IK Knee Pole calculation.
 
