@@ -13,6 +13,14 @@ Steps to implement Auto IK Knee Pole:
 ---
 * "Initiator" means the object that has the initiator properties, which is used to initialize the Auto IK Knee Pole function to target armature(s).
 
+Initiator Properties:
+- "Postfixes of Sides": Comma-separated postfixes, one per leg, e.g. ".L,.R". Every basename property below is combined with each postfix to look up the actual bone names per side.
+- "Leg_IK_Root_Bone_Basename": Basename of the IK root bone (e.g. the hip/thigh bone), without the side postfix.
+- "Leg_IK_Target_Bone_Basename": Basename of the IK tip/target bone (e.g. the foot bone), without the side postfix.
+- "Leg_IK_Pole_Bone_Basename": Basename of the existing IK pole bone, without the side postfix.
+- "Whitelist_of_Keyword": Comma-separated keywords (e.g. "tip,ik,pole"). Only pose bones whose name contains at least one of these keywords will show the Auto IK Knee Pole control UI.
+- "Tip_Bone_Points_Backward": Checkbox. Enable it if the tip (foot) bone's local Y axis points backward (toward the heel) instead of forward (toward the toe); the forward direction used for the calculation will be flipped accordingly.
+
 ---
 What the initialization process does:
 
@@ -54,6 +62,7 @@ Init_PN_postfixes_of_sides = 'Postfixes of Sides'
 Init_PN_leg_ik_root_bone_basename = 'Leg_IK_Root_Bone_Basename'
 Init_PN_leg_ik_target_bone_basename = 'Leg_IK_Target_Bone_Basename'
 Init_PN_leg_ik_pole_bone_basename = 'Leg_IK_Pole_Bone_Basename'
+Init_PN_tip_bone_points_backward = 'Tip_Bone_Points_Backward'  # If True, the tip (foot) bone's local Y axis points backward, so it must be flipped to get the actual forward direction.
 Init_PN_keywords_whitelist = 'Whitelist_of_Keyword'
 
 list_of_Init_PN = [
@@ -61,6 +70,7 @@ list_of_Init_PN = [
     Init_PN_leg_ik_root_bone_basename,
     Init_PN_leg_ik_target_bone_basename,
     Init_PN_leg_ik_pole_bone_basename,
+    Init_PN_tip_bone_points_backward,
     Init_PN_keywords_whitelist
 ]
 
@@ -193,10 +203,17 @@ class POSE_OT_init_initiator_properties(bpy.types.Operator):
             self.report({'WARNING'}, 'Object already has the properties.')
             return {'CANCELLED'}
 
-
+        defaults = {
+            Init_PN_postfixes_of_sides: '.L,.R',
+            Init_PN_leg_ik_root_bone_basename: '',
+            Init_PN_leg_ik_target_bone_basename: '',
+            Init_PN_leg_ik_pole_bone_basename: '',
+            Init_PN_keywords_whitelist: 'ik',
+            Init_PN_tip_bone_points_backward: False,
+        }
         for prop in list_of_Init_PN:
-            obj[prop] = ''
-        obj[Init_PN_postfixes_of_sides] = '.L,.R'
+            if prop not in obj:
+                obj[prop] = defaults.get(prop, '')
         return {'FINISHED'}
     
     @staticmethod
@@ -263,9 +280,13 @@ class POSE_OT_init_for_object(bpy.types.Operator):
         bone_foot = edit_bones[tip_bone_name]
         bone_pole = edit_bones[pole_bone_name]
 
+        # If the tip (foot) bone's local Y axis points backward, flip it to get the actual forward direction.
+        tip_bone_points_backward = initiator.get(Init_PN_tip_bone_points_backward, False)
+        foot_forward_vector = -bone_foot.vector if tip_bone_points_backward else bone_foot.vector
+
         root_to_tip = bone_foot.head - bone_root.head
         stem_bone_length = root_to_tip.length * stem_bone_length_multiplier
-        forward = proj_on_plane(bone_foot.vector, root_to_tip).normalized()
+        forward = proj_on_plane(foot_forward_vector, root_to_tip).normalized()
 
         def add_bone(bone_name, parent):
             bone = edit_bones.new(bone_name)
@@ -285,7 +306,9 @@ class POSE_OT_init_for_object(bpy.types.Operator):
         bone_point_to_pole = add_bone(point_to_pole_name, bone_stem_mid)
         bone_point_to_pole.head = bone_stem_mid.head
         bone_point_to_pole.tail = bone_point_to_pole.head + proj_on_plane(bone_pole.head - bone_point_to_pole.head, root_to_tip).normalized() * stem_bone_length
-        bone_point_to_pole.roll = 0
+        # Explicitly align the Z axis to the stem's up direction (same direction as bone_stem_mid's Y axis) instead of relying on Blender's roll=0 heuristic,
+        # which is discontinuous and can flip the Z axis depending on the bone's own direction, causing the driver's signed-angle rotation to come out mirrored.
+        bone_point_to_pole.align_roll(-root_to_tip)
         bone_point_to_pole.color.palette = 'THEME04'
 
         bone_auto_pole = add_bone(auto_pole_name, bone_point_to_pole)
@@ -341,7 +364,9 @@ class POSE_OT_init_for_object(bpy.types.Operator):
         var_ik_forward = set_up_pose_bone_var('ik_fwd', stem_forward_name)
         var_foot = set_up_pose_bone_var('foot', tip_bone_name)
 
-        driver.expression = f'get_to_knee_rotation({var_ik_up.name}, {var_ik_forward.name}, {var_foot.name})'
+        # Flip the foot's forward axis in the driver too, so it stays consistent with the forward direction used above to place the generated bones.
+        foot_bone_forward_axis_name = '-Y' if tip_bone_points_backward else 'Y'
+        driver.expression = f"get_to_knee_rotation({var_ik_up.name}, {var_ik_forward.name}, {var_foot.name}, foot_bone_forward_axis_name='{foot_bone_forward_axis_name}')"
 
         bpy.ops.object.mode_set(mode = currentMode)  # Restore the original mode after bone creation and constraint addition.
 
