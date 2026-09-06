@@ -102,6 +102,10 @@ GB_stem_forward_basename = 'AIKKP_ik_stem_forward'       # Represents the forwar
 GB_point_to_pole_basename = 'AIKKP_point_to_pole'        # Calculated direction point to knee pole (which has drivers on its Z rotation)
 GB_auto_pole_basename = 'AIKKP_auto_pole'                # Result pole position to be followed. can add delta position on it for manual adjustment
 
+# Bone Collection Names
+BC_tweak_name = 'AIKKP_tweak'  # Holds the auto pole bone, which is meant to be tweaked/selected by the animator.
+BC_mch_name = 'AIKKP_MCH'      # Holds the remaining, purely mechanical helper bones.
+
 # Vector
 X_AXIS = mathutils.Vector((1, 0, 0))
 Y_AXIS = mathutils.Vector((0, 1, 0))
@@ -145,6 +149,12 @@ def get_postfix_of_side(context, custom_property_carrier):
     postfixes_of_sides = custom_property_carrier.get(PN_postfixes_of_sides).split(',')
     matched_postfix = next((postfix for postfix in postfixes_of_sides if context.active_pose_bone.name.endswith(postfix)), '')
     return matched_postfix
+
+def get_or_create_bone_collection(armature_data, name):
+    bone_collection = armature_data.collections.get(name)
+    if bone_collection is None:
+        bone_collection = armature_data.collections.new(name)
+    return bone_collection
 #endregion
 
 
@@ -333,6 +343,14 @@ def init_aikkp_bones(context, initiator, target, post_fix):
     bone_auto_pole = add_bone(auto_pole_name, bone_point_to_pole)
     bone_auto_pole.head = bone_point_to_pole.tail + proj_on_plane(bone_pole.head - bone_point_to_pole.tail, root_to_tip)
     bone_auto_pole.tail = bone_auto_pole.head + bone_point_to_pole.vector.normalized() * bone_pole.vector.length * auto_pole_bone_length_multiplier
+
+    # -- Assign generated bones to bone collections --
+    tweak_collection = get_or_create_bone_collection(target.data, BC_tweak_name)
+    mch_collection = get_or_create_bone_collection(target.data, BC_mch_name)
+
+    tweak_collection.assign(bone_auto_pole)
+    for bone in (bone_stem_mid, bone_stem_forward, bone_point_to_pole):
+        mch_collection.assign(bone)
 
 
     # -- Add pose constraints --
