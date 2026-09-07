@@ -150,10 +150,11 @@ def get_postfix_of_side(context, custom_property_carrier):
     matched_postfix = next((postfix for postfix in postfixes_of_sides if context.active_pose_bone.name.endswith(postfix)), '')
     return matched_postfix
 
-def get_or_create_bone_collection(armature_data, name):
+def get_or_create_bone_collection(armature_data, name, is_visible_by_default=True):
     bone_collection = armature_data.collections.get(name)
     if bone_collection is None:
         bone_collection = armature_data.collections.new(name)
+        bone_collection.is_visible = is_visible_by_default  # Only applied on first creation, so it won't override a visibility state the user changed later.
     return bone_collection
 #endregion
 
@@ -346,7 +347,7 @@ def init_aikkp_bones(context, initiator, target, post_fix):
 
     # -- Assign generated bones to bone collections --
     tweak_collection = get_or_create_bone_collection(target.data, BC_tweak_name)
-    mch_collection = get_or_create_bone_collection(target.data, BC_mch_name)
+    mch_collection = get_or_create_bone_collection(target.data, BC_mch_name, is_visible_by_default=False)
 
     tweak_collection.assign(bone_auto_pole)
     for bone in (bone_stem_mid, bone_stem_forward, bone_point_to_pole):
