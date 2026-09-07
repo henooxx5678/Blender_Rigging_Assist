@@ -477,6 +477,105 @@ class POSE_OT_init_for_rigify(bpy.types.Operator):
 #endregion
 
 
+#region - Removal
+
+# Order matters: a bone must have zero children before it can be removed via edit_bones.remove(),
+# so children (auto_pole, point_to_pole) must be removed before their ancestors (stem_forward, stem_mid).
+GB_basenames_in_removal_order = (
+    GB_auto_pole_basename,
+    GB_point_to_pole_basename,
+    GB_stem_forward_basename,
+    GB_stem_mid_basename,
+)
+
+def remove_aikkp_from_armature(context, target):
+    data = target.data
+
+    if PN_postfixes_of_sides not in data:
+        return False  # Nothing to remove for this armature.
+
+    postfixes = data[PN_postfixes_of_sides].split(',')
+
+    context.view_layer.objects.active = target
+    current_mode = context.object.mode
+
+    # -- Remove pose constraints --
+    bpy.ops.object.mode_set(mode = 'OBJECT')
+
+    for postfix in postfixes:
+        pole_bone_name = data.get(Pbn_actual_pole_bone_name + postfix)
+        pole_snap_target_name = data.get(Pbn_pole_snap_target_name + postfix)
+
+        if pole_bone_name and pole_snap_target_name:
+            pole_pose_bone = target.pose.bones.get(pole_bone_name)
+            if pole_pose_bone:
+                # Identify the AIKKP constraint by type + subtarget (the AIKKP-generated auto_pole bone),
+                # not by its display name, since the pole bone may carry other 'Copy Location' constraints of its own.
+                aikkp_constraint = next(
+                    (c for c in pole_pose_bone.constraints if c.type == 'COPY_LOCATION' and c.subtarget == pole_snap_target_name),
+                    None
+                )
+                if aikkp_constraint:
+                    pole_pose_bone.constraints.remove(aikkp_constraint)
+
+    # -- Remove generated bones (this also takes Bone_PN_AIKKP_mix with it, since it lives on the auto_pole bone) --
+    bpy.ops.object.mode_set(mode = 'EDIT')
+
+    edit_bones = data.edit_bones
+    for postfix in postfixes:
+        for basename in GB_basenames_in_removal_order:
+            bone = edit_bones.get(basename + postfix)
+            if bone:
+                edit_bones.remove(bone)
+
+    bpy.ops.object.mode_set(mode = 'OBJECT')
+
+    # -- Remove bone collections --
+    for coll_name in (BC_tweak_name, BC_mch_name):
+        bone_collection = data.collections.get(coll_name)
+        if bone_collection:
+            data.collections.remove(bone_collection)
+
+    # -- Remove custom properties --
+    prop_names_to_remove = [PN_postfixes_of_sides, PN_keywords_whitelist]
+    for postfix in postfixes:
+        prop_names_to_remove += [Pbn_ui_enable + postfix, Pbn_actual_pole_bone_name + postfix, Pbn_pole_snap_target_name + postfix]
+
+    for prop_name in prop_names_to_remove:
+        if prop_name in data:
+            del data[prop_name]
+
+    bpy.ops.object.mode_set(mode = current_mode)
+    return True
+
+
+class POSE_OT_remove_aikkp(bpy.types.Operator):
+    bl_idname = "pose.remove_aikkp"
+    bl_label = "Remove Auto IK Knee Pole from Selected Armature(s)"
+    bl_description = "Remove all AIKKP-generated bones, constraints, drivers, bone collections, and custom properties from the selected armature(s)"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return len(get_target_armatures(context)) > 0
+
+    def execute(self, context):
+        target_armatures = get_target_armatures(context)
+
+        removed_any = False
+        for target in target_armatures:
+            if remove_aikkp_from_armature(context, target):
+                removed_any = True
+
+        if not removed_any:
+            self.report({'WARNING'}, 'No AIKKP data found on the selected armature(s).')
+            return {'CANCELLED'}
+
+        context.view_layer.update()
+        return {'FINISHED'}
+#endregion
+
+
 #region - Driver Calculation Functions
 def get_result_direction(ik_stem_up, foot_forward, foot_up, foot_right):
     """
@@ -666,6 +765,7 @@ def register():
     bpy.utils.register_class(POSE_OT_init_initiator_properties)
     bpy.utils.register_class(POSE_OT_init_for_object)
     bpy.utils.register_class(POSE_OT_init_for_rigify)
+    bpy.utils.register_class(POSE_OT_remove_aikkp)
     bpy.utils.register_class(Init_UI)
     bpy.utils.register_class(Control_UI)
     bpy.utils.register_class(POSE_OT_pole_snap)
@@ -674,6 +774,7 @@ def unregister():
     bpy.utils.unregister_class(POSE_OT_init_initiator_properties)
     bpy.utils.unregister_class(POSE_OT_init_for_object)
     bpy.utils.unregister_class(POSE_OT_init_for_rigify)
+    bpy.utils.unregister_class(POSE_OT_remove_aikkp)
     bpy.utils.unregister_class(Init_UI)
     bpy.utils.unregister_class(Control_UI)
     bpy.utils.unregister_class(POSE_OT_pole_snap)
