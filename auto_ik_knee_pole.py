@@ -321,6 +321,7 @@ def init_aikkp_bones(context, initiator, target, post_fix):
     def add_bone(bone_name, parent):
         bone = edit_bones.new(bone_name)
         bone.use_connect = False
+        bone.use_deform = False
         if parent is not None:
             bone.parent = parent
         return bone
